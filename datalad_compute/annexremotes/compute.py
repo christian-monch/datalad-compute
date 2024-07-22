@@ -2,42 +2,26 @@ from __future__ import annotations
 
 from base64 import urlsafe_b64decode
 from pathlib import Path
-from typing import (
-    Pattern,
-)
 from urllib.parse import urlparse
 
 from annexremote import Master
-from datalad_next.url_operations import AnyUrlOperations
-
-from . import (
+from datalad_next.annexremotes import (
     SpecialRemote,
     super_main
 )
-from datalad_next.utils.compute import compute
+
+from datalad_compute.utils.compute import compute
 
 
 class ComputeRemote(SpecialRemote):
     def __init__(self, annex: Master):
         super().__init__(annex)
-        self.configs.update(
-            url='Python format language template composing an access URL',
-            match='(whitespace-separated list of) regular expression(s) to match particular components in supported URL via named groups',
-        )
-        self.url_tmpl: str | None = None
-        self.match: list[Pattern[str]] | None = None
-        self.url_handler: AnyUrlOperations | None = None
-        # cache of properties that do not vary within a session
-        # or across annex keys
-        self.persistent_tmpl_props: dict[str, str] = {}
 
     def __del__(self):
         self.close()
 
     def close(self) -> None:
-        if self.url_handler:
-            del self.url_handler
-            self.url_handler = None
+        pass
 
     def _check_url(self, url: str) -> bool:
         return url.startswith('URL--compute:') or url.startswith('compute:')

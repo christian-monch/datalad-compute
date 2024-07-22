@@ -15,7 +15,7 @@ command_suite = (
         # specification of a command, any number of commands can be defined
         (
             # importable module that contains the command implementation
-            'datalad_compute.commands.compute',
+            'datalad_compute.commands.compute_cmd',
             # name of the command class implementation in above module
             'Compute',
             # optional name of the command in the cmdline API

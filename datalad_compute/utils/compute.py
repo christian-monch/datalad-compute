@@ -70,9 +70,7 @@ def compute(template_path: Path,
         'arguments'
     )
 
-    substituted_prerequisites = substitute_arguments(
-        template,
-        substitutions,
-        'prerequisites'
-    )
-    subprocess.run([substituted_executable] + substituted_arguments)
+    if template.get('use_shell', 'false') == 'true':
+        subprocess.run(' '.join([substituted_executable] + substituted_arguments), shell=True)
+    else:
+        subprocess.run([substituted_executable] + substituted_arguments)

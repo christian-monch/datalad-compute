@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import tomllib
+
+from datalad_next.datasets import Dataset
 
 
 def substitute_string(format_str: str,
@@ -30,7 +33,6 @@ def substitute_arguments(spec: dict[str, Any],
 
 def get_substitutions(template: dict[str, Any],
                       arguments: dict[str, str],
-                      output_path: str,
                       ) -> dict[str, str]:
 
     # Check the user specified inputs
@@ -40,28 +42,24 @@ def get_substitutions(template: dict[str, Any],
     if not all(input_name in arguments for input_name in inputs):
         raise ValueError('Template inputs and arguments have different names')
 
-    output_name = template['output']
-    all_variables = inputs + [output_name]
-    if len(all_variables) != len(set(all_variables)):
-        raise ValueError('Template inputs/output contain duplicates')
+    if len(inputs) != len(set(inputs)):
+        raise ValueError('Template inputs contain duplicates')
 
     return {
-        **{
-            input_name: arguments[input_name]
-            for input_name in inputs
-        },
-        output_name: output_path
+        input_name: arguments[input_name]
+        for input_name in inputs
     }
 
 
-def compute(template_path: Path,
+def compute(root_directory: Path,
+            template_path: Path,
             compute_arguments: dict[str, str],
-            output_path: str,
-            ):
+            ) -> None:
+
     with template_path.open('rb') as f:
         template = tomllib.load(f)
 
-    substitutions = get_substitutions(template, compute_arguments, output_path)
+    substitutions = get_substitutions(template, compute_arguments)
 
     substituted_executable = substitute_string(template['executable'], substitutions)
     substituted_arguments = substitute_arguments(
@@ -70,7 +68,8 @@ def compute(template_path: Path,
         'arguments'
     )
 
-    if template.get('use_shell', 'false') == 'true':
-        subprocess.run(' '.join([substituted_executable] + substituted_arguments), shell=True)
-    else:
-        subprocess.run([substituted_executable] + substituted_arguments)
+    with contextlib.chdir(root_directory):
+        if template.get('use_shell', 'false') == 'true':
+            subprocess.run(' '.join([substituted_executable] + substituted_arguments), shell=True)
+        else:
+            subprocess.run([substituted_executable] + substituted_arguments)

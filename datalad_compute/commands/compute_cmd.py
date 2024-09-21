@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 from itertools import chain
@@ -26,11 +26,9 @@ from datalad_next.constraints import (
     EnsureStr,
 )
 from datalad_next.datasets import Dataset
-from datalad_next.runners import call_git_oneline, call_git_success, iter_subproc
-from datasalad.runners import iter_subproc
-from datasalad.itertools import (
-    itemize,
-    load_json,
+from datalad_next.runners import (
+    call_git_oneline,
+    call_git_success,
 )
 
 from .. import (
@@ -162,17 +160,18 @@ def add_url(dataset: Dataset,
     # Build the file-specific URL and store it in the annex
     url = url_base + f'&this={quote(file_path)}'
     file_dataset_path, file_path = get_file_dataset(dataset.pathobj / file_path)
-    call_git_success(
+    success = call_git_success(
         ['-C', str(file_dataset_path), 'annex', 'addurl', url, '--file', file_path]
         + (['--relaxed'] if url_only else []))
+    assert success, f'\naddurl failed:\nfile_dataset_path: {file_dataset_path}\nurl: {url!r}\nfile_path: {file_path!r}'
     return url
 
 
-def get_file_dataset(file: Path) -> [Path, Path]:
+def get_file_dataset(file: Path) -> tuple[Path, Path]:
     """ Get dataset of file and relative path of file from the dataset
 
-    Determine the dataset that contains the file and the relative path of the
-    file in this dataset."""
+    Determine the path of the dataset that contains the file and the relative
+    path of the file in this dataset."""
     top_level = Path(call_git_oneline(
         ['-C', str(file.parent), 'rev-parse', '--show-toplevel']
     ))
@@ -206,13 +205,8 @@ def execute(worktree: Path,
         'execute: %s %s %s %s', str(worktree),
         template_name, repr(parameter), repr(output))
 
-    assert_annexed(worktree, output)
-
     # Unlock output files in the worktree-directory
-    for o in output:
-        call_git_success(
-            ['-C', str(worktree), 'annex', 'unlock', o],
-            capture_output=True)
+    unlock_files(Dataset(worktree), output)
 
     # Run the computation in the worktree-directory
     template_path = worktree / template_dir / template_name
@@ -223,24 +217,6 @@ def execute(worktree: Path,
     compute(worktree, template_path, parameter_dict)
 
 
-def assert_annexed(worktree: Path,
-                   files: list[str]
-                   ) -> None:
-
-    present_files = list(filter(lambda f: Path(f).exists(), files))
-    with contextlib.chdir(worktree):
-        with iter_subproc(['git', 'annex', 'info', '--json', '--batch', '-z'],
-                          inputs=(file.encode() + b'\x00' for file in present_files),
-                          bufsize=0) as results:
-            not_annexed = tuple(filter(
-                lambda r: r['success'] == False,
-                load_json(itemize(results, sep=b'\n'))))
-            if not_annexed:
-                raise ValueError(
-                    f'Output files are not annexed: ' + ', '.join(
-                        map(lambda na: na['file'], not_annexed)))
-
-
 def collect(worktree: Path,
             dataset: Dataset,
             output: list[str],
@@ -249,15 +225,28 @@ def collect(worktree: Path,
     lgr.debug('collect: %s %s %s', str(worktree), dataset, repr(output))
 
     # Unlock output files in the dataset-directory and copy the result
+    unlock_files(dataset, output)
     for o in output:
-        dest = dataset.pathobj / o
-        call_git_success(
-            ['-C', dataset.path, 'annex', 'unlock', str(dest)],
-            capture_output=True)
-        shutil.copyfile(worktree / o, dest)
+        shutil.copyfile(worktree / o, dataset.pathobj / o)
 
     # Save the dataset
-    dataset.save()
+    dataset.save(recursive=True)
+
+
+def unlock_files(dataset: Dataset,
+                 files: list[str]
+                 ) -> None:
+    """Use datalad to resolve subdatasets and unlock files in the dataset."""
+    for f in files:
+        file = dataset.pathobj / f
+        if not file.exists() and file.is_symlink():
+            # `datalad unlock` does not unlock dangling symlinks, so we
+            # mimic the behavior of `git annex unlock` here:
+            link = os.readlink(file)
+            file.unlink()
+            file.write_text('/annex/objects/' + link.split('/')[-1] + '\n')
+        elif file.is_symlink():
+            dataset.unlock(file)
 
 
 def un_provide(dataset: Dataset,

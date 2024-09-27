@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from contextlib import chdir
 
 from datalad_next.datasets import Dataset
@@ -10,17 +9,18 @@ from ..gitworktree import (
     provide,
     remove,
 )
-from ...test_utils.create_datasets import create_ds_hierarchy
+from .create_datasets import create_ds_hierarchy
 
 
 def test_worktree_basic(tmp_path):
-    dataset = create_ds_hierarchy(str(tmp_path), 3)[0][0]
+    dataset = create_ds_hierarchy(tmp_path, 'ds1', 3)[0][2]
     worktree = Dataset(provide(
         dataset.path,
+        str(tmp_path),
         input_files=[
             'a.txt', 'b.txt',
-            'subds0/a0.txt', 'subds0/b0.txt',
-            'subds0/subds1/a1.txt', 'subds0/subds1/b1.txt'
+            'ds1_subds0/a0.txt', 'ds1_subds0/b0.txt',
+            'ds1_subds0/ds1_subds1/a1.txt', 'ds1_subds0/ds1_subds1/b1.txt'
         ],
     ))
 

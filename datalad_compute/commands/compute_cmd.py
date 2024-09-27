@@ -12,6 +12,7 @@ from itertools import chain
 from pathlib import Path
 from urllib.parse import quote
 
+from datalad.support.exceptions import IncompleteResultsError
 from datalad_next.commands import (
     EnsureCommandParameterization,
     ValidatedInterface,
@@ -160,10 +161,12 @@ class Compute(ValidatedInterface):
 def read_list(list_file: str | Path | None) -> list[str]:
     if list_file is None:
         return []
-    return list(
-        filter(
-            lambda s: s != '',
-            Path(list_file).read_text().splitlines(keepends=False)))
+    return list(filter(
+        lambda s: s != '' and not s.startswith('#'),
+        [
+            line.strip()
+            for line in Path(list_file).read_text().splitlines(keepends=False)
+        ]))
 
 
 def get_url(dataset: Dataset,
@@ -201,7 +204,9 @@ def add_url(dataset: Dataset,
     file_dataset_path, file_path = get_file_dataset(dataset.pathobj / file_path)
     success = call_git_success(
         ['-C', str(file_dataset_path), 'annex', 'addurl', url, '--file', file_path]
-        + (['--relaxed'] if url_only else []))
+        + (['--relaxed'] if url_only else []),
+        capture_output=True,)
+
     assert success, f'\naddurl failed:\nfile_dataset_path: {file_dataset_path}\nurl: {url!r}\nfile_path: {file_path!r}'
     return url
 
@@ -244,6 +249,10 @@ def execute(worktree: Path,
         'execute: %s %s %s %s', str(worktree),
         template_name, repr(parameter), repr(output))
 
+    # Get the subdatasets, directories, and files that are part of the output
+    # space.
+    create_output_space(Dataset(worktree), output)
+
     # Unlock output files in the worktree-directory
     unlock_files(Dataset(worktree), output)
 
@@ -266,10 +275,12 @@ def collect(worktree: Path,
     # Unlock output files in the dataset-directory and copy the result
     unlock_files(dataset, output)
     for o in output:
-        shutil.copyfile(worktree / o, dataset.pathobj / o)
+        destination = dataset.pathobj / o
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(worktree / o, destination)
 
     # Save the dataset
-    dataset.save(recursive=True)
+    dataset.save(recursive=True, result_renderer='disabled')
 
 
 def unlock_files(dataset: Dataset,
@@ -283,13 +294,26 @@ def unlock_files(dataset: Dataset,
         for f in files:
             file = dataset.pathobj / f
             if not file.exists() and file.is_symlink():
-                # `datalad unlock` does not unlock dangling symlinks, so we
+                # `datalad unlock` does not "unlock" dangling symlinks, so we
                 # mimic the behavior of `git annex unlock` here:
                 link = os.readlink(file)
                 file.unlink()
                 file.write_text('/annex/objects/' + link.split('/')[-1] + '\n')
             elif file.is_symlink():
-                dataset.unlock(file)
+                dataset.unlock(file, result_renderer='disabled')
+
+
+def create_output_space(dataset: Dataset,
+                        files: list[str]
+                        ) -> None:
+    """Get all files that are part of the output space."""
+    for f in files:
+        try:
+            dataset.get(f, result_renderer='disabled')
+        except IncompleteResultsError:
+            # The file does not yet exist. The computation should create it.
+            # We create the directory here.
+            (dataset.pathobj / f).parent.mkdir(parents=True, exist_ok=True)
 
 
 def un_provide(dataset: Dataset,

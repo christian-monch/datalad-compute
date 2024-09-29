@@ -12,11 +12,12 @@ import shutil
 from argparse import ArgumentParser
 from contextlib import chdir
 from pathlib import Path
-from urllib.parse import urlparse
+from typing import Iterable
 
 from datalad_next.datasets import Dataset
 from datalad_next.runners import call_git_success
 
+from datalad_compute.utils.glob import resolve_patterns
 from ..commands.compute_cmd import read_list
 
 
@@ -43,15 +44,16 @@ argument_parser.add_argument(
     '-i', '--input',
     action='append',
     metavar='PATH',
-    help='Path of a file that should be provisioned (relative from dataset '
-         'root), at least one input has tp be provided (use multiple times to '
-         'define multiple inputs)',
+    help='File pattern that should be provisioned (relative from dataset '
+         'root), at least one input has to be provided (use multiple times to '
+         'define multiple inputs). Patterns are resolved by Python\'s globbing '
+         'rules. They are resolved in the source dataset.',
 )
 argument_parser.add_argument(
     '-I', '--input-list',
     metavar='PATH',
     default=None,
-    help='Path of a file that contains a list of input paths',
+    help='Path of a file that contains a list of input file patterns',
 )
 argument_parser.add_argument(
     '-t', '--temp-dir',
@@ -92,24 +94,10 @@ def prune_worktrees(dataset: Dataset) -> None:
         prune_worktrees(Dataset(result['path']))
 
 
-def ensure_absolute_gitmodule_urls(original_dataset: Dataset,
-                                   dataset: Dataset
-                                   ) -> None:
-    sub_datasets = dataset.subdatasets(result_renderer='disabled')
-    for subdataset in sub_datasets:
-        name, location_spec = subdataset['gitmodule_name'], subdataset['gitmodule_url']
-        parse_result = urlparse(location_spec)
-        if parse_result.scheme == '':
-            if not Path(location_spec).is_absolute():
-                args = ['submodule', 'set-url', name, original_dataset.path]
-                call_git_success(args, cwd=dataset.path, capture_output=True)
-    dataset.save(result_renderer='disabled')
-
-
 def provide(dataset_dir: str,
             temp_dir: str,
             source_branch: str | None = None,
-            input_files: list[str] | None = None,
+            input_patterns: Iterable[str] | None = None,
             ) -> Path:
 
     lgr.debug('Provisioning dataset %s', dataset_dir)
@@ -117,6 +105,9 @@ def provide(dataset_dir: str,
     worktree_dir = Path(temp_dir) / worktree_name
     if not worktree_dir.exists():
         worktree_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve input file patterns in the original dataset
+    input_files = resolve_patterns(dataset_dir, input_patterns)
 
     # Create a worktree
     with chdir(dataset_dir):
@@ -128,11 +119,9 @@ def provide(dataset_dir: str,
         call_git_success(args, capture_output=True)
 
     worktree_dataset = Dataset(worktree_dir)
-    # Ensure that all subdatasets have absolute URLs
-    ensure_absolute_gitmodule_urls(Dataset(dataset_dir), worktree_dataset)
     # Get all input files in the worktree
     with chdir(worktree_dataset.path):
-        for file in input_files or []:
+        for file in input_files:
             lgr.debug('Provisioning file %s', file)
             worktree_dataset.get(file, result_renderer='disabled')
 

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from itertools import chain
 from pathlib import Path
+from typing import Iterable
 from urllib.parse import quote
 
 from datalad.support.exceptions import IncompleteResultsError
@@ -41,7 +42,6 @@ from ..utils.compute import compute
 
 
 __docformat__ = 'restructuredtext'
-
 
 lgr = logging.getLogger('datalad.compute.compute_cmd')
 
@@ -88,13 +88,17 @@ class Compute(ValidatedInterface):
         input=Parameter(
             args=('-i', '--input',),
             action='append',
-            doc="Name of an input file (repeat for multiple inputs)"),
+            doc="An input file pattern (repeat for multiple inputs, "
+                "file pattern support python globbing, globbing is expanded "
+                "in the source dataset"),
         input_list=Parameter(
             args=('-I', '--input-list',),
-            doc="Name of a file that contains a list of input files. Format is "
-                "one file per line, relative path from `dataset`. Empty lines, "
-                "i.e. lines that contain only newlines, arg ignored. This is "
-                "useful if a large number of input files should be provided."),
+            doc="Name of a file that contains a list of input file patterns. "
+                "Format is one file per line, relative path from `dataset`. "
+                "Empty lines, i.e. lines that contain only newlines, and lines "
+                "that start with '#' are ignored. Line content is stripped "
+                "before used. This is useful if a large number of input file "
+                "patterns should be provided."),
         output=Parameter(
             args=('-o', '--output',),
             action='append',
@@ -114,11 +118,12 @@ class Compute(ValidatedInterface):
         parameter_list=Parameter(
             args=('-P', '--parameter-list',),
             doc="Name of a file that contains a list of parameters. Format "
-                "is one `<name>=<value>` string per line. Empty lines, "
-                "i.e. lines that contain only newlines, arg ignored. This is "
-                "useful if a large number of parameters should be provided."),
+                "is one `<name>=<value>` string per line. "
+                "Empty lines, i.e. lines that contain only newlines, and lines "
+                "that start with '#' are ignored. Line content is stripped "
+                "before used. This is useful if a large number of parameters "
+                "should be provided."),
     )
-
 
     @staticmethod
     @datasetmethod(name='compute')
@@ -137,17 +142,23 @@ class Compute(ValidatedInterface):
 
         dataset : Dataset = dataset.ds if dataset else Dataset('.')
 
-        input = (input or []) + read_list(input_list)
+        input_pattern = (input or []) + read_list(input_list)
         output = (output or []) + read_list(output_list)
         parameter = (parameter or []) + read_list(parameter_list)
 
         if not url_only:
-            worktree = provide(dataset, branch, input)
+            worktree = provide(dataset, branch, input_pattern)
             execute(worktree, template, parameter, output)
             collect(worktree, dataset, output)
             un_provide(dataset, worktree)
 
-        url_base = get_url(dataset, branch, template, parameter, input, output)
+        url_base = get_url(
+            dataset,
+            branch,
+            template,
+            parameter,
+            input_pattern,
+            output)
 
         for out in output:
             url = add_url(dataset, out, url_base, url_only)
@@ -226,15 +237,15 @@ def get_file_dataset(file: Path) -> tuple[Path, Path]:
 
 def provide(dataset: Dataset,
             branch: str | None,
-            input: list[str],
+            input_patterns: list[str],
             ) -> Path:
 
-    lgr.debug('provide: %s %s %s', dataset, branch, input)
+    lgr.debug('provide: %s %s %s', dataset, branch, input_patterns)
 
     args = ['provide-gitworktree', dataset.path, ] + (
         ['--branch', branch] if branch else []
     )
-    args.extend(chain(*[('--input', i) for i in (input or [])]))
+    args.extend(chain(*[('--input', i) for i in (input_patterns or [])]))
     stdout = subprocess.run(args, stdout=subprocess.PIPE, check=True).stdout
     return Path(stdout.splitlines()[-1].decode())
 
@@ -249,12 +260,13 @@ def execute(worktree: Path,
         'execute: %s %s %s %s', str(worktree),
         template_name, repr(parameter), repr(output))
 
+    worktree_ds = Dataset(worktree)
     # Get the subdatasets, directories, and files that are part of the output
     # space.
-    create_output_space(Dataset(worktree), output)
+    create_output_space(worktree_ds, output)
 
-    # Unlock output files in the worktree-directory
-    unlock_files(Dataset(worktree), output)
+    # Unlock output files in the output space (worktree-directory)
+    unlock_files(worktree_ds, output)
 
     # Run the computation in the worktree-directory
     template_path = worktree / template_dir / template_name
@@ -267,14 +279,13 @@ def execute(worktree: Path,
 
 def collect(worktree: Path,
             dataset: Dataset,
-            output: list[str],
+            output: Iterable[str],
             ) -> None:
-
-    lgr.debug('collect: %s %s %s', str(worktree), dataset, repr(output))
 
     # Unlock output files in the dataset-directory and copy the result
     unlock_files(dataset, output)
     for o in output:
+        lgr.debug('collect: collecting %s', o)
         destination = dataset.pathobj / o
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(worktree / o, destination)
@@ -284,7 +295,7 @@ def collect(worktree: Path,
 
 
 def unlock_files(dataset: Dataset,
-                 files: list[str]
+                 files: Iterable[str]
                  ) -> None:
     """Use datalad to resolve subdatasets and unlock files in the dataset."""
     # TODO: for some reason `dataset unlock` does not operate in the
@@ -304,16 +315,15 @@ def unlock_files(dataset: Dataset,
 
 
 def create_output_space(dataset: Dataset,
-                        files: list[str]
+                        files: Iterable[str]
                         ) -> None:
     """Get all files that are part of the output space."""
     for f in files:
         try:
             dataset.get(f, result_renderer='disabled')
         except IncompleteResultsError:
-            # The file does not yet exist. The computation should create it.
-            # We create the directory here.
-            (dataset.pathobj / f).parent.mkdir(parents=True, exist_ok=True)
+            # Ignore non-existing files
+            pass
 
 
 def un_provide(dataset: Dataset,

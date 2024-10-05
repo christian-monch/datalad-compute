@@ -69,18 +69,18 @@ environment:
       INSTALL_GITANNEX: git-annex -m snapshot
       CODECOV_BINARY: https://uploader.codecov.io/latest/linux/codecov
     # Windows core tests
-    - ID: WinP39core
+    - ID: WinP311core
       # ~35 min
       DTS: datalad_compute
       APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
       # Python version specification is non-standard on windows
-      PY: 39-x64
+      PY: 311-x64
       INSTALL_GITANNEX: git-annex -m datalad/packages
     # MacOS core tests
-    - ID: MacP38core
+    - ID: MacP311core
       DTS: datalad_compute
       APPVEYOR_BUILD_WORKER_IMAGE: macos-monterey
-      PY: 3.8
+      PY: 3.11
       INSTALL_GITANNEX: git-annex
       DATALAD_LOCATIONS_SOCKETS: /Users/appveyor/DLTMP/sockets
       CODECOV_BINARY: https://uploader.codecov.io/latest/macos/codecov

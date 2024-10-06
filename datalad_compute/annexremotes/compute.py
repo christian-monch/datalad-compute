@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import shutil
 import subprocess
-from hashlib import md5
 from pathlib import Path
-from typing import Any
+from typing import (
+    Any,
+    Iterable,
+)
 from urllib.parse import (
     unquote,
     urlparse,
@@ -29,7 +30,7 @@ from ..commands.compute_cmd import (
     provide,
     un_provide,
 )
-
+from ..utils.glob import resolve_patterns
 
 lgr = logging.getLogger('datalad.compute.annexremotes.compute')
 
@@ -150,11 +151,14 @@ class ComputeRemote(SpecialRemote):
     def _collect(self,
                  worktree: Path,
                  dataset: Dataset,
-                 outputs: list[str],
+                 output_patterns: Iterable[str],
                  this: str,
                  this_destination: str,
                  ) -> None:
         """Collect computation results for `this` (and all other outputs) """
+
+        # Get all outputs that were created during computation
+        outputs = resolve_patterns(root_dir=worktree, patterns=output_patterns)
 
         # Collect all output files that have been created while creating
         # `this` file.
@@ -167,26 +171,15 @@ class ComputeRemote(SpecialRemote):
                 cwd=dataset_path,
                 capture_output=True)
             if is_annexed:
+                self.annex.debug(f'_collect: reinject: {worktree / output} -> {dataset_path}:{file_path}')
                 call_git_success(
                     ['annex', 'reinject', str(worktree / output), str(file_path)],
                     cwd=dataset_path,
                     capture_output=True)
-            else:
-                # Check that the files in worktree and source dataset are identical
-                assert (
-                    _hash_file(dataset.pathobj / output)
-                    == _hash_file(worktree / output),
-                    f'calculated output: ({worktree / output}) differs from '
-                    f'original output: ({dataset.pathobj / output}).')
 
         # Collect `this` file. It has to be copied to the destination given
         # by git-annex. Git-annex will check its integrity.
         shutil.copyfile(worktree / this, this_destination)
-
-
-def _hash_file(file: str | Path) -> str:
-    with open(file, 'rb') as f:
-        return hashlib.file_digest(f, 'md5').hexdigest()
 
 
 def main():

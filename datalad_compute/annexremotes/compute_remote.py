@@ -122,8 +122,8 @@ class ComputeRemote(SpecialRemote):
             lgr.debug('Starting collection')
             self.annex.debug('Starting collection')
             self._collect(worktree, dataset, compute_info['output'], compute_info['this'], file_name)
-            lgr.debug('Starting unprovision')
-            self.annex.debug('Starting unprovision')
+            lgr.debug('Leaving provision context')
+            self.annex.debug('Leaving provision context')
 
     def checkpresent(self, key: str) -> bool:
         # See if at least one URL with the compute url-scheme is present
@@ -133,7 +133,7 @@ class ComputeRemote(SpecialRemote):
                       root_id: str
                       ) -> Dataset:
         """Find the first enclosing dataset with the given root_id"""
-        current_dir = Path(self.annex.getgitdir()) / '..'
+        current_dir = Path(self.annex.getgitdir()).parent.absolute()
 
         while current_dir != Path('/'):
             result = subprocess.run(
@@ -143,11 +143,10 @@ class ComputeRemote(SpecialRemote):
                     '--get', 'datalad.dataset.id'
                 ],
                 stdout=subprocess.PIPE)
-            if result.returncode != 0:
-                continue
-            if result.stdout.decode().strip() == root_id:
-                return Dataset(current_dir)
-            current_dir = current_dir / '..'
+            if result.returncode == 0:
+                if result.stdout.decode().strip() == root_id:
+                    return Dataset(current_dir)
+            current_dir = current_dir.parent
         raise RemoteError(f'Could not find dataset {root_id!r}')
 
     def _collect(self,

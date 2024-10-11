@@ -283,11 +283,20 @@ def add_url(dataset: Dataset,
     # Build the file-specific URL and store it in the annex
     url = url_base + f'&this={quote(file_path)}'
     file_dataset_path, file_path = get_file_dataset(dataset.pathobj / file_path)
-    is_annexed = call_git_success(
-        ['annex', 'whereis', str(file_path)],
-        cwd=file_dataset_path,
-        capture_output=True)
-    if is_annexed:
+
+    # If the file does not exist and speculative computation is requested, we
+    # can just add the URL.
+    if not (dataset.pathobj / file_path).exists() and url_only:
+        can_add = True
+    else:
+        # Check if the file is annexed, otherwise we cannot add a URL
+        can_add = call_git_success(
+            ['annex', 'whereis', str(file_path)],
+            cwd=file_dataset_path,
+            capture_output=True)
+
+    # Add the URL
+    if can_add:
         success = call_git_success(
             ['annex', 'addurl', url, '--file', file_path]
             + (['--relaxed'] if url_only else []),
@@ -323,7 +332,8 @@ def provide(dataset: Dataset,
     result = dataset.provision(
         input=input_patterns,
         branch=branch,
-        no_globbing=no_globbing)
+        no_globbing=no_globbing,
+        result_renderer='disabled')
     return Path(result[0]['path'])
 
 
@@ -343,7 +353,7 @@ def provide_context(dataset: Dataset,
         yield worktree
     finally:
         lgr.debug('un_provide: %s %s', dataset, str(worktree))
-        dataset.provision(delete=worktree)
+        dataset.provision(delete=worktree, result_renderer='disabled')
 
 
 def execute(worktree: Path,

@@ -5,6 +5,7 @@ from contextlib import chdir
 from pathlib import Path
 from typing import Iterable
 
+import pytest
 from datalad_next.datasets import Dataset
 from datalad_next.runners import call_git_lines
 
@@ -165,13 +166,6 @@ def test_unclean_dataset(tmp_path):
         worktree_dir=tmp_path / 'ds1_worktree2',
         result_renderer='disabled')
 
-    # Check that non-input file `c.txt` is ignored
-    (dataset.pathobj / 'c.txt').write_text('content')
-    dataset.provision(
-        input=input_pattern,
-        worktree_dir=tmp_path / 'ds1_worktree3',
-        result_renderer='disabled')
-
 
 def test_branch_deletion_after_provision(tmp_path):
     dataset = create_ds_hierarchy(tmp_path, 'ds1', 3)[0][2]
@@ -211,7 +205,6 @@ def test_not_present_local_datasets(tmp_path):
     provisioned_dataset_2 = Dataset(
         root_ds.provision(
             input=['ds000102/README'],
-            no_globbing=True,
             on_failure='ignore',
             result_renderer='disabled')[0]['path'])
     url_2 = _get_submodule_url(provisioned_dataset_2, 'ds000102')
